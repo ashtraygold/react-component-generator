@@ -1,5 +1,6 @@
 import { stripCodeFences, ensureRenderCall } from './generator';
 import { withModelFallback } from './fallback';
+import { validatePromptInput } from './validateRequest';
 
 // 우선순위 순서. 앞 모델이 실패하면 다음 모델로 폴백한다.
 const GOOGLE_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.5-flash'];
@@ -173,9 +174,10 @@ const server = Bun.serve({
           );
         }
 
-        if (!prompt) {
+        const promptCheck = validatePromptInput(prompt);
+        if (!promptCheck.valid) {
           return Response.json(
-            { error: 'Prompt is required' },
+            { error: promptCheck.error },
             { status: 400, headers: CORS_HEADERS }
           );
         }

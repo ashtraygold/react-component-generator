@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { loadStored, saveStored } from './storage';
+import { loadStored, saveStored, removeStored } from './storage';
 
 describe('storage', () => {
   beforeEach(() => {
     localStorage.clear();
+    sessionStorage.clear();
     vi.restoreAllMocks();
   });
 
@@ -47,5 +48,34 @@ describe('storage', () => {
       throw new Error('quota');
     });
     expect(() => saveStored('k', 1)).not.toThrow();
+  });
+
+  describe('session 저장소', () => {
+    it('session을 지정하면 sessionStorage에만 저장한다', () => {
+      saveStored('k', 'v', 'session');
+      expect(sessionStorage.getItem('k')).toBe('"v"');
+      expect(localStorage.getItem('k')).toBeNull();
+    });
+
+    it('session을 지정하면 sessionStorage에서 읽는다', () => {
+      sessionStorage.setItem('k', '"v"');
+      expect(loadStored('k', 'default', undefined, 'session')).toBe('v');
+      expect(loadStored('k', 'default')).toBe('default');
+    });
+  });
+
+  describe('removeStored', () => {
+    it('지정한 저장소에서 값을 지운다', () => {
+      localStorage.setItem('k', '1');
+      removeStored('k');
+      expect(localStorage.getItem('k')).toBeNull();
+    });
+
+    it('접근이 막혀 있어도 예외를 던지지 않는다', () => {
+      vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+        throw new Error('blocked');
+      });
+      expect(() => removeStored('k')).not.toThrow();
+    });
   });
 });

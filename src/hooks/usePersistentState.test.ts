@@ -3,7 +3,10 @@ import { renderHook, act } from '@testing-library/react';
 import { usePersistentState } from './usePersistentState';
 
 describe('usePersistentState', () => {
-  beforeEach(() => localStorage.clear());
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
 
   it('저장된 값이 없으면 fallback으로 시작한다', () => {
     const { result } = renderHook(() => usePersistentState('k', 'default'));
@@ -28,6 +31,16 @@ describe('usePersistentState', () => {
     first.unmount();
 
     const second = renderHook(() => usePersistentState('k', 'default'));
+    expect(second.result.current[0]).toBe('changed');
+  });
+
+  it('session을 지정하면 sessionStorage에 저장하고 복원한다', () => {
+    const first = renderHook(() => usePersistentState('k', 'default', undefined, 'session'));
+    act(() => first.result.current[1]('changed'));
+    expect(localStorage.getItem('k')).toBeNull();
+    first.unmount();
+
+    const second = renderHook(() => usePersistentState('k', 'default', undefined, 'session'));
     expect(second.result.current[0]).toBe('changed');
   });
 });

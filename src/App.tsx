@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { usePersistentState } from './hooks/usePersistentState';
 import { addToHistory, parseHistory } from './utils/history';
+import { removeStored } from './utils/storage';
 import { EMPTY_API_KEYS, parseApiKeys, parseProvider } from './utils/apiKeys';
 import { PromptInput } from './components/PromptInput';
 import { ComponentCard } from './components/ComponentCard';
@@ -14,7 +15,12 @@ const PROVIDER_CONFIG = {
 } as const;
 
 function App() {
-  const [apiKeys, setApiKeys] = usePersistentState('rcg:apiKeys', EMPTY_API_KEYS, parseApiKeys);
+  const [apiKeys, setApiKeys] = usePersistentState(
+    'rcg:apiKeys',
+    EMPTY_API_KEYS,
+    parseApiKeys,
+    'session',
+  );
   const [provider, setProvider] = usePersistentState<Provider>('rcg:provider', 'google', parseProvider);
   const [history, setHistory] = usePersistentState<string[]>('rcg:history', [], parseHistory);
   const [showKey, setShowKey] = useState(false);
@@ -27,6 +33,11 @@ function App() {
     useComponentGenerator();
 
   useEffect(() => {
+    // API 키를 localStorage에 저장하던 이전 버전의 잔여 값을 지운다.
+    removeStored('rcg:apiKeys');
+  }, []);
+
+  useEffect(() => {
     fetch('/api/config')
       .then((res) => res.json())
       .then((data) => setEnvKeys(data.envKeys))
@@ -35,13 +46,15 @@ function App() {
 
   const hasEnvKey = envKeys[provider];
 
-  const handleGenerate = (prompt: string) => {
+  const handleGenerate = async (prompt: string) => {
     if (!apiKey.trim() && !hasEnvKey) {
       alert(`${PROVIDER_CONFIG[provider].label} API 키를 입력하거나 .env에 설정해주세요.`);
       return;
     }
-    setHistory((prev) => addToHistory(prev, prompt));
-    generate(prompt, apiKey || undefined, provider);
+    const succeeded = await generate(prompt, apiKey || undefined, provider);
+    if (succeeded) {
+      setHistory((prev) => addToHistory(prev, prompt));
+    }
   };
 
   const handleApiKeyChange = (value: string) => {
@@ -132,7 +145,11 @@ function App() {
               </button>
             </div>
             <p className={`key-status ${hasEnvKey ? 'key-status--ready' : ''}`}>
-              {hasEnvKey ? '.env 키가 연결되어 있습니다.' : '직접 입력하거나 서버 환경변수를 설정하세요.'}
+              {hasEnvKey
+                ? apiKey
+                  ? '직접 입력한 키가 .env 키보다 우선합니다. 이 탭을 닫으면 지워집니다.'
+                  : '.env 키가 연결되어 있습니다.'
+                : '직접 입력하거나 서버 환경변수를 설정하세요. 입력한 키는 이 탭을 닫으면 지워집니다.'}
             </p>
           </div>
         </aside>

@@ -49,4 +49,30 @@ describe('useComponentGenerator 저장', () => {
     act(() => result.current.clearAll());
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toEqual([]);
   });
+
+  it('생성에 성공하면 true를 반환한다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ code: 'render(<b />)' }) }),
+    );
+    const { result } = renderHook(() => useComponentGenerator());
+    let ok: boolean | undefined;
+    await act(async () => {
+      ok = await result.current.generate('p', undefined, 'google');
+    });
+    expect(ok).toBe(true);
+  });
+
+  it('생성에 실패하면 false를 반환한다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: false, json: async () => ({ error: '실패' }) }),
+    );
+    const { result } = renderHook(() => useComponentGenerator());
+    let ok: boolean | undefined;
+    await act(async () => {
+      ok = await result.current.generate('p', undefined, 'google');
+    });
+    expect(ok).toBe(false);
+  });
 });
