@@ -63,4 +63,22 @@ describe('PromptInput', () => {
       expect(onGenerate).not.toHaveBeenCalled();
     });
   });
+
+  describe('프롬프트 히스토리', () => {
+    it('history가 없으면 최근 프롬프트 영역을 보여주지 않는다', () => {
+      render(<PromptInput onGenerate={vi.fn()} isLoading={false} />);
+      expect(screen.queryByText('최근 프롬프트')).not.toBeInTheDocument();
+    });
+
+    it('history 항목을 버튼으로 보여주고 클릭하면 입력창에 채운다', async () => {
+      const user = userEvent.setup();
+      render(
+        <PromptInput onGenerate={vi.fn()} isLoading={false} history={['로그인 폼', '가격표']} />,
+      );
+
+      await user.click(screen.getByRole('button', { name: '로그인 폼' }));
+      expect(screen.getByRole('textbox')).toHaveValue('로그인 폼');
+      expect(screen.getByRole('button', { name: '가격표' })).toBeInTheDocument();
+    });
+  });
 });
