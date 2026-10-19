@@ -1,6 +1,8 @@
 import { stripCodeFences, ensureRenderCall } from './generator';
 import { withModelFallback } from './fallback';
 import { validatePromptInput } from './validateRequest';
+import { relayStream } from './relayStream';
+import { toErrorResponse } from './errors';
 
 // 우선순위 순서. 앞 모델이 실패하면 다음 모델로 폴백한다.
 const GOOGLE_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.5-flash'];
@@ -136,8 +138,106 @@ async function callGoogle(prompt: string, apiKey: string): Promise<string> {
   return withModelFallback(GOOGLE_MODELS, (model) => callGoogleModel(prompt, apiKey, model));
 }
 
+type ParsedGenerateRequest =
+  | { ok: true; prompt: string; provider: Provider; apiKey: string }
+  | { ok: false; response: Response };
+
+/** 일반/스트리밍 생성 엔드포인트가 공유하는 요청 검증. 실패하면 그대로 돌려줄 Response를 담는다. */
+async function parseGenerateRequest(req: Request): Promise<ParsedGenerateRequest> {
+  const { prompt, apiKey, provider = 'anthropic' } = (await req.json()) as {
+    prompt: string;
+    apiKey?: string;
+    provider?: Provider;
+  };
+
+  const resolvedKey = resolveApiKey(provider, apiKey);
+
+  if (!resolvedKey) {
+    return {
+      ok: false,
+      response: Response.json(
+        { error: `API key is required. Set ${provider === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'GOOGLE_API_KEY'} in .env or enter it manually.` },
+        { status: 400, headers: CORS_HEADERS }
+      ),
+    };
+  }
+
+  const promptCheck = validatePromptInput(prompt);
+  if (!promptCheck.valid) {
+    return {
+      ok: false,
+      response: Response.json({ error: promptCheck.error }, { status: 400, headers: CORS_HEADERS }),
+    };
+  }
+
+  return { ok: true, prompt, provider, apiKey: resolvedKey };
+}
+
+function errorResponse(err: unknown): Response {
+  const { status, error } = toErrorResponse(err);
+  return Response.json({ error }, { status, headers: CORS_HEADERS });
+}
+
+// 스트리밍 호출은 응답 본문을 읽기 전에 상태 코드만 검사해, 연결 실패는 모델 폴백이 처리하게 한다.
+// 에러 메시지에는 상태 코드만 담는다. 요청 URL(Google 키 포함)은 넣지 않는다.
+async function openAnthropicStream(prompt: string, apiKey: string, signal: AbortSignal): Promise<Response> {
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 4096,
+      stream: true,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Claude API error: ${response.status}`);
+  }
+  return response;
+}
+
+async function openGoogleStream(
+  prompt: string,
+  apiKey: string,
+  model: string,
+  signal: AbortSignal,
+): Promise<Response> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: { maxOutputTokens: 8192 },
+    }),
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Gemini API error: ${response.status}`);
+  }
+  return response;
+}
+
+function openStream(provider: Provider, prompt: string, apiKey: string, signal: AbortSignal): Promise<Response> {
+  return provider === 'google'
+    ? withModelFallback(GOOGLE_MODELS, (model) => openGoogleStream(prompt, apiKey, model, signal))
+    : openAnthropicStream(prompt, apiKey, signal);
+}
+
 const server = Bun.serve({
-  port: 3002,
+  // API_PORT로 덮어쓸 수 있다(워크트리 등에서 이미 떠 있는 서버와 겹칠 때). vite.config.ts의 프록시와 같은 값을 쓴다.
+  port: Number(process.env.API_PORT) || 3002,
   async fetch(req) {
     if (req.method === 'OPTIONS') {
       return new Response(null, { headers: CORS_HEADERS });
@@ -159,58 +259,40 @@ const server = Bun.serve({
 
     if (req.method === 'POST' && url.pathname === '/api/generate') {
       try {
-        const { prompt, apiKey, provider = 'anthropic' } = (await req.json()) as {
-          prompt: string;
-          apiKey?: string;
-          provider?: Provider;
-        };
-
-        const resolvedKey = resolveApiKey(provider, apiKey);
-
-        if (!resolvedKey) {
-          return Response.json(
-            { error: `API key is required. Set ${provider === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'GOOGLE_API_KEY'} in .env or enter it manually.` },
-            { status: 400, headers: CORS_HEADERS }
-          );
-        }
-
-        const promptCheck = validatePromptInput(prompt);
-        if (!promptCheck.valid) {
-          return Response.json(
-            { error: promptCheck.error },
-            { status: 400, headers: CORS_HEADERS }
-          );
-        }
+        const parsed = await parseGenerateRequest(req);
+        if (!parsed.ok) return parsed.response;
 
         const text =
-          provider === 'google'
-            ? await callGoogle(prompt, resolvedKey)
-            : await callAnthropic(prompt, resolvedKey);
+          parsed.provider === 'google'
+            ? await callGoogle(parsed.prompt, parsed.apiKey)
+            : await callAnthropic(parsed.prompt, parsed.apiKey);
 
         const code = ensureRenderCall(stripCodeFences(text));
 
         return Response.json({ code }, { headers: CORS_HEADERS });
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown error';
+        return errorResponse(err);
+      }
+    }
 
-        if (message.includes('503')) {
-          return Response.json(
-            { error: 'API 서버가 일시적으로 과부하 상태입니다. 잠시 후 다시 시도해주세요.' },
-            { status: 503, headers: CORS_HEADERS }
-          );
-        }
+    // 생성 중인 코드를 SSE로 흘려보낸다. 업스트림 연결이 열리기 전의 실패는 일반 JSON 에러로,
+    // 스트리밍 도중의 실패는 `error` 이벤트로 알린다.
+    if (req.method === 'POST' && url.pathname === '/api/generate/stream') {
+      try {
+        const parsed = await parseGenerateRequest(req);
+        if (!parsed.ok) return parsed.response;
 
-        if (message.includes('429')) {
-          return Response.json(
-            { error: '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.' },
-            { status: 429, headers: CORS_HEADERS }
-          );
-        }
+        const upstream = await openStream(parsed.provider, parsed.prompt, parsed.apiKey, req.signal);
 
-        return Response.json(
-          { error: message },
-          { status: 500, headers: CORS_HEADERS }
-        );
+        return new Response(relayStream(parsed.provider, upstream), {
+          headers: {
+            ...CORS_HEADERS,
+            'Content-Type': 'text/event-stream; charset=utf-8',
+            'Cache-Control': 'no-cache, no-transform',
+          },
+        });
+      } catch (err) {
+        return errorResponse(err);
       }
     }
 

@@ -8,7 +8,8 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:3002',
+        // server/index.ts와 같은 API_PORT(기본 3002)를 쓴다.
+        target: `http://localhost:${process.env.API_PORT || 3002}`,
         changeOrigin: true,
       },
     },

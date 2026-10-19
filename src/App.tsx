@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { usePersistentState } from './hooks/usePersistentState';
 import { addToHistory, parseHistory } from './utils/history';
 import { removeStored } from './utils/storage';
@@ -29,8 +29,17 @@ function App() {
     anthropic: false,
     google: false,
   });
-  const { components, isLoading, error, generate, removeComponent, clearAll } =
+  const { components, pending, isLoading, error, generate, removeComponent, clearAll } =
     useComponentGenerator();
+  // 스트리밍 중인 컴포넌트를 맨 앞에 둔다. 완료되면 같은 id로 components 맨 앞에 들어오므로
+  // 카드가 다시 만들어지지 않고 같은 인스턴스에서 탭만 미리보기로 전환된다.
+  const displayed = pending ? [pending, ...components] : components;
+  const pendingId = pending?.id;
+  const resultsRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (pendingId) resultsRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  }, [pendingId]);
 
   useEffect(() => {
     // API 키를 localStorage에 저장하던 이전 버전의 잔여 값을 지운다.
@@ -161,40 +170,34 @@ function App() {
         </div>
       )}
 
-      <section className="results-section">
-        {components.length > 0 && (
+      <section className="results-section" ref={resultsRef}>
+        {displayed.length > 0 && (
           <div className="results-header">
             <h2>
-              생성된 컴포넌트 <span className="count">({components.length})</span>
+              생성된 컴포넌트 <span className="count">({displayed.length})</span>
             </h2>
-            <button className="btn-clear" onClick={clearAll}>
+            <button className="btn-clear" onClick={clearAll} disabled={isLoading}>
               전체 삭제
             </button>
           </div>
         )}
 
-        {components.length === 0 && !isLoading && (
+        {displayed.length === 0 && (
           <div className="empty-state">
             <h2>생성된 컴포넌트가 없습니다</h2>
             <p>위 입력창에 요청을 작성하고 컴포넌트 생성을 선택하세요.</p>
           </div>
         )}
 
-        {isLoading && (
-          <div className="loading-card">
-            <div className="loading-pulse" />
-            <p>컴포넌트를 생성하고 있습니다...</p>
-          </div>
-        )}
-
         <div className="results-grid">
-          {components.map((component) => (
+          {displayed.map((component) => (
             <ComponentCard
               key={component.id}
               component={component}
               onRemove={removeComponent}
               onRegenerate={handleGenerate}
               isLoading={isLoading}
+              streaming={component.id === pendingId}
             />
           ))}
         </div>
