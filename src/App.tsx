@@ -1,4 +1,8 @@
 import { useState, useEffect } from 'react';
+import { usePersistentState } from './hooks/usePersistentState';
+import { addToHistory, parseHistory } from './utils/history';
+import { removeStored } from './utils/storage';
+import { EMPTY_API_KEYS, parseApiKeys, parseProvider } from './utils/apiKeys';
 import { PromptInput } from './components/PromptInput';
 import { ComponentCard } from './components/ComponentCard';
 import { useComponentGenerator } from './hooks/useComponentGenerator';
@@ -11,15 +15,27 @@ const PROVIDER_CONFIG = {
 } as const;
 
 function App() {
-  const [apiKey, setApiKey] = useState('');
+  const [apiKeys, setApiKeys] = usePersistentState(
+    'rcg:apiKeys',
+    EMPTY_API_KEYS,
+    parseApiKeys,
+    'session',
+  );
+  const [provider, setProvider] = usePersistentState<Provider>('rcg:provider', 'google', parseProvider);
+  const [history, setHistory] = usePersistentState<string[]>('rcg:history', [], parseHistory);
   const [showKey, setShowKey] = useState(false);
-  const [provider, setProvider] = useState<Provider>('google');
+  const apiKey = apiKeys[provider];
   const [envKeys, setEnvKeys] = useState<Record<Provider, boolean>>({
     anthropic: false,
     google: false,
   });
   const { components, isLoading, error, generate, removeComponent, clearAll } =
     useComponentGenerator();
+
+  useEffect(() => {
+    // API 키를 localStorage에 저장하던 이전 버전의 잔여 값을 지운다.
+    removeStored('rcg:apiKeys');
+  }, []);
 
   useEffect(() => {
     fetch('/api/config')
@@ -30,17 +46,19 @@ function App() {
 
   const hasEnvKey = envKeys[provider];
 
-  const handleGenerate = (prompt: string) => {
+  const handleGenerate = async (prompt: string) => {
     if (!apiKey.trim() && !hasEnvKey) {
       alert(`${PROVIDER_CONFIG[provider].label} API 키를 입력하거나 .env에 설정해주세요.`);
       return;
     }
-    generate(prompt, apiKey || undefined, provider);
+    const succeeded = await generate(prompt, apiKey || undefined, provider);
+    if (succeeded) {
+      setHistory((prev) => addToHistory(prev, prompt));
+    }
   };
 
-  const handleProviderChange = (newProvider: Provider) => {
-    setProvider(newProvider);
-    setApiKey('');
+  const handleApiKeyChange = (value: string) => {
+    setApiKeys((prev) => ({ ...prev, [provider]: value }));
   };
 
   const activeProvider = PROVIDER_CONFIG[provider].label;
@@ -81,7 +99,7 @@ function App() {
 
       <main className="workspace">
         <section className="composer-panel" aria-label="컴포넌트 생성">
-          <PromptInput onGenerate={handleGenerate} isLoading={isLoading} />
+          <PromptInput onGenerate={handleGenerate} isLoading={isLoading} history={history} />
         </section>
 
         <aside className="settings-panel" aria-label="실행 설정">
@@ -93,7 +111,7 @@ function App() {
             <select
               id="provider"
               value={provider}
-              onChange={(e) => handleProviderChange(e.target.value as Provider)}
+              onChange={(e) => setProvider(e.target.value as Provider)}
             >
               {Object.entries(PROVIDER_CONFIG).map(([key, { label }]) => (
                 <option key={key} value={key}>
@@ -111,7 +129,7 @@ function App() {
                 id="api-key"
                 type={showKey ? 'text' : 'password'}
                 value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
+                onChange={(e) => handleApiKeyChange(e.target.value)}
                 placeholder={
                   hasEnvKey
                     ? '서버 키 사용 중 (직접 입력으로 덮어쓰기 가능)'
@@ -127,7 +145,11 @@ function App() {
               </button>
             </div>
             <p className={`key-status ${hasEnvKey ? 'key-status--ready' : ''}`}>
-              {hasEnvKey ? '.env 키가 연결되어 있습니다.' : '직접 입력하거나 서버 환경변수를 설정하세요.'}
+              {hasEnvKey
+                ? apiKey
+                  ? '직접 입력한 키가 .env 키보다 우선합니다. 이 탭을 닫으면 지워집니다.'
+                  : '.env 키가 연결되어 있습니다.'
+                : '직접 입력하거나 서버 환경변수를 설정하세요. 입력한 키는 이 탭을 닫으면 지워집니다.'}
             </p>
           </div>
         </aside>
