@@ -433,6 +433,12 @@ button:focus-visible,
   text-align: left;
 }
 
+.example-chip--history {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .example-chip:hover {
   background: var(--primary-soft);
   border-color: var(--primary);

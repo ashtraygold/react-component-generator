@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import type { GeneratedComponent, Provider } from '../types';
-import { parseComponents } from '../utils/components';
+import { parseComponents, addComponent } from '../utils/components';
 import { usePersistentState } from './usePersistentState';
 
 const COMPONENTS_KEY = 'rcg:components';
@@ -47,7 +47,7 @@ export function useComponentGenerator(): UseComponentGeneratorReturn {
         createdAt: new Date(),
       };
 
-      setComponents((prev) => [newComponent, ...prev]);
+      setComponents((prev) => addComponent(prev, newComponent));
       return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';

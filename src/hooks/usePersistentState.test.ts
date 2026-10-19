@@ -43,4 +43,23 @@ describe('usePersistentState', () => {
     const second = renderHook(() => usePersistentState('k', 'default', undefined, 'session'));
     expect(second.result.current[0]).toBe('changed');
   });
+
+  describe('다른 탭과 동기화', () => {
+    const fireStorageEvent = (key: string, newValue: string | null, storageArea: Storage) =>
+      window.dispatchEvent(new StorageEvent('storage', { key, newValue, storageArea }));
+
+    it('다른 탭에서 같은 키가 바뀌면 상태를 갱신한다', () => {
+      const { result } = renderHook(() => usePersistentState('k', 'default'));
+      localStorage.setItem('k', JSON.stringify('from-other-tab'));
+      act(() => fireStorageEvent('k', JSON.stringify('from-other-tab'), localStorage));
+      expect(result.current[0]).toBe('from-other-tab');
+    });
+
+    it('다른 키의 변경은 무시한다', () => {
+      const { result } = renderHook(() => usePersistentState('k', 'default'));
+      localStorage.setItem('other', JSON.stringify('x'));
+      act(() => fireStorageEvent('other', JSON.stringify('x'), localStorage));
+      expect(result.current[0]).toBe('default');
+    });
+  });
 });

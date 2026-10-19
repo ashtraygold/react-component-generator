@@ -70,6 +70,14 @@ describe('PromptInput', () => {
       expect(screen.queryByText('최근 프롬프트')).not.toBeInTheDocument();
     });
 
+    it('history 칩은 title로 전체 프롬프트를 보여준다', () => {
+      render(<PromptInput onGenerate={vi.fn()} isLoading={false} history={['아주 긴 프롬프트']} />);
+      expect(screen.getByRole('button', { name: '아주 긴 프롬프트' })).toHaveAttribute(
+        'title',
+        '아주 긴 프롬프트',
+      );
+    });
+
     it('history 항목을 버튼으로 보여주고 클릭하면 입력창에 채운다', async () => {
       const user = userEvent.setup();
       render(

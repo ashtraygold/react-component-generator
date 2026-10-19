@@ -20,7 +20,7 @@ export function PromptInput({ onGenerate, isLoading, history = [] }: PromptInput
   const [prompt, setPrompt] = useState('');
 
   const validation = validatePrompt(prompt);
-  const length = [...prompt.trim()].length;
+  const { length } = validation;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,7 +82,8 @@ export function PromptInput({ onGenerate, isLoading, history = [] }: PromptInput
           {history.map((item) => (
             <button
               key={item}
-              className="example-chip"
+              className="example-chip example-chip--history"
+              title={item}
               onClick={() => handleExampleClick(item)}
               type="button"
             >

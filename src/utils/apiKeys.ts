@@ -8,10 +8,9 @@ const PROVIDERS = Object.keys(EMPTY_API_KEYS) as Provider[];
 export function parseApiKeys(raw: unknown): Record<Provider, string> {
   if (typeof raw !== 'object' || raw === null) throw new Error('api keys must be an object');
   const source = raw as Record<string, unknown>;
-  return {
-    anthropic: typeof source.anthropic === 'string' ? source.anthropic : '',
-    google: typeof source.google === 'string' ? source.google : '',
-  };
+  return Object.fromEntries(
+    PROVIDERS.map((provider) => [provider, typeof source[provider] === 'string' ? source[provider] : '']),
+  ) as Record<Provider, string>;
 }
 
 export function parseProvider(raw: unknown): Provider {
